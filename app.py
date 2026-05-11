@@ -1,295 +1,180 @@
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 import sqlite3
+import webbrowser
+import os
+from threading import Timer
 from datetime import datetime
+from werkzeug.utils import secure_filename
 
-# --- Configuração do Banco de Dados ---
+app = Flask(__name__)
+app.secret_key = 'chave_mestra_sisvenda'
+
+# --- CONFIGURAÇÃO DE PASTAS ---
+UPLOAD_FOLDER = os.path.join('static', 'uploads')
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+# --- FUNÇÕES DE BANCO DE DADOS ---
+def get_db():
+    conn = sqlite3.connect('sisvenda.db')
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
-    with sqlite3.connect('sisvenda.db') as conn:
+    with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT UNIQUE, 
-                            senha TEXT,
-                            tipo TEXT)''')
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            username TEXT UNIQUE, 
+            senha TEXT, 
+            tipo TEXT)''')
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS clientes (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            nome TEXT, 
-                            cpf TEXT UNIQUE,
-                            usuario_id INTEGER,
-                            FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            nome TEXT, 
+            cpf TEXT UNIQUE, 
+            usuario_id INTEGER, 
+            FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS produtos (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            nome TEXT, preco REAL, estoque INTEGER)''')
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            nome TEXT, 
+            preco REAL, 
+            estoque INTEGER, 
+            imagem TEXT)''')
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS vendas (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            cliente_id INTEGER, produto_id INTEGER,
-                            quantidade INTEGER, total REAL, data TEXT,
-                            FOREIGN KEY(cliente_id) REFERENCES clientes(id),
-                            FOREIGN KEY(produto_id) REFERENCES produtos(id))''')
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            cliente_id INTEGER, 
+            produto_id INTEGER, 
+            quantidade INTEGER, 
+            total REAL, 
+            data TEXT, 
+            FOREIGN KEY(cliente_id) REFERENCES clientes(id), 
+            FOREIGN KEY(produto_id) REFERENCES produtos(id))''')
         
+        # Cria usuário admin padrão se não existir
         try:
-            cursor.execute("INSERT INTO usuarios (username, senha, tipo) VALUES (?, ?, ?)", 
-                           ('admin', '1234', 'admin'))
-        except sqlite3.IntegrityError: 
+            cursor.execute("INSERT INTO usuarios (username, senha, tipo) VALUES (?, ?, ?)", ('admin', '1234', 'admin'))
+        except sqlite3.IntegrityError:
             pass
         conn.commit()
 
-# --- Variável Global do Carrinho (apenas para a sessão do cliente) ---
-carrinho = []
-
-# --- Funções de Gestão (ADMIN) ---
-
-def cadastrar_produto():
-    print("\n--- CADASTRO DE PRODUTO ---")
-    nome = input("Nome do Produto: ")
-    preco = float(input("Preço: "))
-    estoque = int(input("Quantidade em Estoque: "))
-    with sqlite3.connect('sisvenda.db') as conn:
-        conn.execute("INSERT INTO produtos (nome, preco, estoque) VALUES (?, ?, ?)", (nome, preco, estoque))
-        print("✅ Produto cadastrado!")
-
-def gerenciar_clientes():
-    print("\n--- LISTA DE CLIENTES ---")
-    with sqlite3.connect('sisvenda.db') as conn:
-        cursor = conn.execute("SELECT id, nome, cpf FROM clientes")
-        clientes = cursor.fetchall()
-        for c in clientes:
-            print(f"ID: {c[0]} | Nome: {c[1]} | CPF: {c[2]}")
-    
-    op = input("\nDeseja remover algum cliente? (S/N): ").upper()
-    if op == 'S':
-        id_cliente = input("Digite o ID do cliente para remover: ")
-        with sqlite3.connect('sisvenda.db') as conn:
-            conn.execute("DELETE FROM usuarios WHERE id = (SELECT usuario_id FROM clientes WHERE id = ?)", (id_cliente,))
-            conn.execute("DELETE FROM clientes WHERE id = ?", (id_cliente,))
-            print("✅ Cliente e conta de usuário removidos!")
-
-def ver_vendas_total():
-    print("\n--- TODAS AS VENDAS DO SISTEMA ---")
-    with sqlite3.connect('sisvenda.db') as conn:
-        cursor = conn.execute('''SELECT v.id, c.nome, p.nome, v.quantidade, v.total, v.data 
-                                 FROM vendas v 
-                                 JOIN clientes c ON v.cliente_id = c.id 
-                                 JOIN produtos p ON v.produto_id = p.id''')
-        for v in cursor.fetchall():
-            print(f"ID: {v[0]} | Cliente: {v[1]} | Produto: {v[2]} | Qtd: {v[3]} | Total: R${v[4]:.2f} | Data: {v[5]}")
-
-def gerenciar_produtos_admin():
-    print("\n--- GESTÃO DE PRODUTOS ---")
-    ver_produtos_geral()
-    op = input("\nDeseja remover algum produto? (S/N): ").upper()
-    if op == 'S':
-        id_prod = input("Digite o ID do produto para remover: ")
-        with sqlite3.connect('sisvenda.db') as conn:
-            conn.execute("DELETE FROM produtos WHERE id = ?", (id_prod,))
-            print("✅ Produto removido!")
-
-def analise_geral():
-    print("\n--- ANALISE E EDIÇÃO GERAL ---")
-    print("1. Editar Preço de Produto")
-    print("2. Editar Nome de Cliente")
-    print("3. Ver resumo financeiro")
-    op = input("Escolha: ")
-    with sqlite3.connect('sisvenda.db') as conn:
-        if op == '1':
-            id_p = input("ID do produto: ")
-            novo_p = float(input("Novo preço: "))
-            conn.execute("UPDATE produtos SET preco = ? WHERE id = ?", (novo_p, id_p))
-            print("✅ Preço atualizado!")
-        elif op == '3':
-            res = conn.execute("SELECT SUM(total) FROM vendas").fetchone()
-            print(f"💰 Faturamento Total: R${res[0] if res[0] else 0:.2f}")
-
-def repor_estoque():
-    ver_produtos_geral()
-    id_p = input("\nID do produto para repor: ")
-    qtd = int(input("Quantidade a adicionar: "))
-    with sqlite3.connect('sisvenda.db') as conn:
-        conn.execute("UPDATE produtos SET estoque = estoque + ? WHERE id = ?", (qtd, id_p))
-        print("✅ Estoque abastecido!")
-
-# --- Funções do Cliente ---
-
-def ver_produtos_geral():
-    with sqlite3.connect('sisvenda.db') as conn:
-        cursor = conn.execute("SELECT * FROM produtos")
-        prods = cursor.fetchall()
-        for p in prods:
-            print(f"ID: {p[0]} | {p[1]} | R${p[2]:.2f} | Estoque: {p[3]}")
-    return prods
-
-def adicionar_ao_carrinho():
-    print("\n--- ADICIONAR AO CARRINHO ---")
-    ver_produtos_geral()
-    try:
-        id_p = int(input("\nDigite o ID do produto: "))
-        qtd = int(input("Quantidade desejada: "))
-        
-        with sqlite3.connect('sisvenda.db') as conn:
-            p = conn.execute("SELECT nome, preco, estoque FROM produtos WHERE id = ?", (id_p,)).fetchone()
-            if p and p[2] >= qtd:
-                carrinho.append({'id': id_p, 'nome': p[0], 'preco': p[1], 'quantidade': qtd})
-                print(f"🛒 {p[0]} adicionado ao carrinho!")
-            else:
-                print("❌ Produto insuficiente no estoque ou ID inválido.")
-    except ValueError:
-        print("❌ Digite valores numéricos válidos.")
-
-def ver_carrinho(user_id):
-    if not carrinho:
-        print("\n🛒 Seu carrinho está vazio!")
-        return
-
-    print("\n--- SEU CARRINHO ---")
-    total_venda = 0
-    for i, item in enumerate(carrinho):
-        subtotal = item['preco'] * item['quantidade']
-        total_venda += subtotal
-        print(f"{i+1}. {item['nome']} - {item['quantidade']}x R${item['preco']:.2f} = R${subtotal:.2f}")
-    
-    print(f"TOTAL: R${total_venda:.2f}")
-    print("\n1. Finalizar Compra")
-    print("2. Esvaziar Carrinho")
-    print("3. Voltar")
-    
-    op = input("Escolha: ")
-    if op == '1':
-        finalizar_venda(user_id)
-    elif op == '2':
-        carrinho.clear()
-        print("🛒 Carrinho limpo.")
-
-def finalizar_venda(user_id):
-    with sqlite3.connect('sisvenda.db') as conn:
-        cursor = conn.cursor()
-        # Encontra o ID do cliente vinculado ao usuário logado
-        cliente = cursor.execute("SELECT id FROM clientes WHERE usuario_id = ?", (user_id,)).fetchone()
-        if not cliente:
-            print("❌ Perfil de cliente não encontrado.")
+# --- UTILITÁRIOS ---
+def abrir_no_firefox():
+    url = "http://127.0.0.1:5000"
+    caminhos = [
+        r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+        os.path.expanduser("~") + r"\AppData\Local\Mozilla Firefox\firefox.exe"
+    ]
+    for caminho in caminhos:
+        if os.path.exists(caminho):
+            webbrowser.register('firefox', None, webbrowser.BackgroundBrowser(caminho))
+            webbrowser.get('firefox').open(url)
             return
-        
-        cliente_id = cliente[0]
-        data_venda = datetime.now().strftime("%d/%m/%Y %H:%M")
+    webbrowser.open(url)
 
-        for item in carrinho:
-            # Insere na tabela de vendas
-            cursor.execute("INSERT INTO vendas (cliente_id, produto_id, quantidade, total, data) VALUES (?, ?, ?, ?, ?)",
-                           (cliente_id, item['id'], item['quantidade'], item['preco'] * item['quantidade'], data_venda))
-            # Baixa no estoque
-            cursor.execute("UPDATE produtos SET estoque = estoque - ? WHERE id = ?", (item['quantidade'], item['id']))
-        
-        conn.commit()
-        carrinho.clear()
-        print("✨ Compra realizada com sucesso! Obrigado!")
+# --- ROTAS ---
 
-def ver_meus_pedidos(user_id):
-    print("\n--- MEUS PEDIDOS ---")
-    with sqlite3.connect('sisvenda.db') as conn:
-        cursor = conn.execute('''SELECT p.nome, v.quantidade, v.total, v.data 
-                                 FROM vendas v 
-                                 JOIN produtos p ON v.produto_id = p.id
-                                 JOIN clientes c ON v.cliente_id = c.id
-                                 WHERE c.usuario_id = ?''', (user_id,))
-        pedidos = cursor.fetchall()
-        if not pedidos:
-            print("Nenhuma compra realizada ainda.")
-        for p in pedidos:
-            print(f"[{p[3]}] {p[0]} | Qtd: {p[1]} | Total: R${p[2]:.2f}")
+@app.route('/')
+def index():
+    if 'user_id' not in session: 
+        return render_template('index.html', tela='login')
+    
+    conn = get_db()
+    produtos = conn.execute("SELECT * FROM produtos").fetchall()
+    clientes = conn.execute("SELECT * FROM clientes").fetchall()
+    vendas = conn.execute('''SELECT v.id, c.nome as cliente, p.nome as produto, v.quantidade, v.total, v.data 
+                             FROM vendas v 
+                             JOIN clientes c ON v.cliente_id = c.id 
+                             JOIN produtos p ON v.produto_id = p.id''').fetchall()
+    
+    res_fat = conn.execute("SELECT SUM(total) FROM vendas").fetchone()
+    faturamento = res_fat[0] if res_fat[0] is not None else 0
+    
+    return render_template('index.html', tela='home', produtos=produtos, clientes=clientes, vendas=vendas, faturamento=faturamento)
 
-# --- Autenticação ---
-
+@app.route('/login', methods=['POST'])
 def login():
-    print("\n" + "="*30)
-    print("      SISTEMA SISVENDA")
-    print("1. Fazer Login")
-    print("2. Criar Nova Conta")
-    print("3. Sair")
-    print("="*30)
-    
-    opcao = input("Escolha: ")
-    if opcao == '2':
-        import_criar_conta()
-        return None
-    elif opcao == '3':
-        exit()
-    
-    u = input("Usuário: ").strip()
-    s = input("Senha: ").strip()
+    u = request.form.get('username')
+    s = request.form.get('senha')
+    user = get_db().execute("SELECT * FROM usuarios WHERE username = ? AND senha = ?", (u, s)).fetchone()
+    if user:
+        session.update({'user_id': user['id'], 'username': user['username'], 'tipo': user['tipo']})
+    return redirect(url_for('index'))
 
-    with sqlite3.connect('sisvenda.db') as conn:
-        res = conn.execute("SELECT tipo, id, username FROM usuarios WHERE username = ? AND senha = ?", (u, s)).fetchone()
-        if res:
-            print(f"\n✅ Bem-vindo, {res[2]}!")
-            return res[0], res[1] # Retorna (tipo, id)
-        print("\n❌ Login inválido!")
-        return None
+@app.route('/cadastrar_produto', methods=['POST'])
+def cadastrar_produto():
+    if session.get('tipo') == 'admin':
+        try:
+            nome = request.form.get('nome')
+            preco = float(request.form.get('preco', 0))
+            estoque = int(request.form.get('estoque', 0))
+            
+            # Tratamento da Imagem
+            file = request.files.get('imagem')
+            filename = "default.png"
+            
+            if file and file.filename != '':
+                filename = secure_filename(file.filename)
+                caminho_salvamento = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(caminho_salvamento)
 
-def import_criar_conta():
-    nome = input("Nome Completo: ")
-    cpf = input("CPF: ")
-    user = input("Username: ")
-    senha = input("Senha: ")
-    try:
-        with sqlite3.connect('sisvenda.db') as conn:
-            c = conn.cursor()
-            c.execute("INSERT INTO usuarios (username, senha, tipo) VALUES (?, ?, 'cliente')", (user, senha))
-            u_id = c.lastrowid
-            c.execute("INSERT INTO clientes (nome, cpf, usuario_id) VALUES (?, ?, ?)", (nome, cpf, u_id))
-            print("✅ Conta criada!")
-    except:
-        print("❌ Erro ao criar conta (Username ou CPF já existem).")
-
-# --- Loop Principal ---
-
-def main():
-    init_db()
-    
-    while True:
-        user_data = login()
-        if not user_data: continue
-        
-        tipo, uid = user_data
-        
-        while True:
-            print("\n" + "="*30)
-            print(f"MENU {tipo.upper()}")
-            print("="*30)
-
-            if tipo == 'admin':
-                print("1. Cadastrar Produto")
-                print("2. Ver Clientes (Remover)")
-                print("3. Ver Todas as Vendas")
-                print("4. Ver Todos os Produtos (Remover)")
-                print("5. Analise Geral (Editar/Resumo)")
-                print("6. Estoque de Produtos (Repor)")
-                print("7. Realizar Venda (Ir para Catálogo)")
-                print("8. Sair")
+            with get_db() as conn:
+                conn.execute("INSERT INTO produtos (nome, preco, estoque, imagem) VALUES (?, ?, ?, ?)", 
+                             (nome, preco, estoque, filename))
+                conn.commit()
                 
-                op = input("\nEscolha: ")
-                if op == '1': cadastrar_produto()
-                elif op == '2': gerenciar_clientes()
-                elif op == '3': ver_vendas_total()
-                elif op == '4': gerenciar_produtos_admin()
-                elif op == '5': analise_geral()
-                elif op == '6': repor_estoque()
-                elif op == '7': adicionar_ao_carrinho() # Adm também pode usar o carrinho
-                elif op == '8': break
+        except Exception as e:
+            print(f"Erro ao cadastrar produto: {e}")
+            flash(f"Erro ao salvar: {e}")
+            
+    return redirect(url_for('index'))
 
-            else: # Menu Cliente
-                print("1. Realizar Compra (Adicionar ao Carrinho)")
-                print("2. Ver Catálogo de Produtos")
-                print("3. Ver Meus Pedidos")
-                print("4. Ver Carrinho / Finalizar")
-                print("8. Sair")
-                
-                op = input("\nEscolha: ")
-                if op == '1' or op == '2': adicionar_ao_carrinho()
-                elif op == '3': ver_meus_pedidos(uid)
-                elif op == '4': ver_carrinho(uid)
-                elif op == '8': break
+@app.route('/repor_estoque/<int:id>', methods=['POST'])
+def repor_estoque(id):
+    if session.get('tipo') == 'admin':
+        try:
+            qtd_raw = request.form.get('quantidade')
+            if qtd_raw:
+                qtd = int(qtd_raw)
+                with get_db() as conn:
+                    conn.execute("UPDATE produtos SET estoque = estoque + ? WHERE id = ?", (qtd, id))
+                    conn.commit()
+        except ValueError:
+            pass
+    return redirect(url_for('index'))
+
+@app.route('/remover_produto/<int:id>')
+def remover_produto(id):
+    if session.get('tipo') == 'admin':
+        with get_db() as conn: 
+            conn.execute("DELETE FROM produtos WHERE id = ?", (id,))
+            conn.commit()
+    return redirect(url_for('index'))
+
+@app.route('/remover_cliente/<int:id>')
+def remover_cliente(id):
+    if session.get('tipo') == 'admin':
+        with get_db() as conn:
+            user = conn.execute("SELECT usuario_id FROM clientes WHERE id = ?", (id,)).fetchone()
+            if user and user[0]: 
+                conn.execute("DELETE FROM usuarios WHERE id = ?", (user[0],))
+            conn.execute("DELETE FROM clientes WHERE id = ?", (id,))
+            conn.commit()
+    return redirect(url_for('index'))
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
 
 if __name__ == "__main__":
-    main()
+    init_db()
+    # Timer para abrir o navegador automaticamente
+    Timer(1.5, abrir_no_firefox).start()
+    # Ativado debug=True para você ver erros detalhados no console caso algo falhe
+    app.run(debug=True, use_reloader=False)

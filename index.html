@@ -11,15 +11,44 @@
 {% if tela == 'login' %}
 <div class="login-container">
     <div class="login-card">
-        <i class="fas fa-user-shield"></i>
-        <h2>Acesso Administrativo</h2>
-        <form action="/login" method="POST">
-            <input type="text" name="username" placeholder="Usuário" required>
-            <input type="password" name="senha" placeholder="Senha" required>
-            <button type="submit" class="btn-primary">Entrar</button>
-        </form>
+        <div class="auth-tabs">
+            <button onclick="toggleAuth('login')" id="btn-tab-login" class="tab-btn active">Login</button>
+            <button onclick="toggleAuth('cadastro')" id="btn-tab-cadastro" class="tab-btn">Cadastrar</button>
+        </div>
+
+        <div id="form-login">
+            <i class="fas fa-user-shield"></i>
+            <h2>Acesso</h2>
+            <form action="/login" method="POST">
+                <input type="text" name="username" placeholder="Usuário" required>
+                <input type="password" name="senha" placeholder="Senha" required>
+                <button type="submit" class="btn-primary">Entrar</button>
+            </form>
+        </div>
+
+        <div id="form-cadastro" style="display: none;">
+            <i class="fas fa-user-plus"></i>
+            <h2>Criar Conta</h2>
+            <form action="/cadastrar_cliente_externo" method="POST">
+                <input type="text" name="nome" placeholder="Nome Completo" required>
+                <input type="text" name="cpf" placeholder="CPF" required>
+                <input type="text" name="username" placeholder="Usuário" required>
+                <input type="password" name="senha" placeholder="Senha" required>
+                <button type="submit" class="btn-primary" style="background-color: #10b981;">Cadastrar</button>
+            </form>
+        </div>
     </div>
 </div>
+
+<script>
+    // Função para trocar entre as telas de Login e Cadastro
+    function toggleAuth(tipo) {
+        document.getElementById('form-login').style.display = tipo === 'login' ? 'block' : 'none';
+        document.getElementById('form-cadastro').style.display = tipo === 'cadastro' ? 'block' : 'none';
+        document.getElementById('btn-tab-login').classList.toggle('active', tipo === 'login');
+        document.getElementById('btn-tab-cadastro').classList.toggle('active', tipo === 'cadastro');
+    }
+</script>
 
 {% elif tela == 'home' %}
 <div class="dashboard">
@@ -118,6 +147,7 @@
         </div>
     </main>
 </div>
+
 <script>
     function showTab(t){
         document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active'));

@@ -55,7 +55,6 @@ def init_db():
             FOREIGN KEY(cliente_id) REFERENCES clientes(id), 
             FOREIGN KEY(produto_id) REFERENCES produtos(id))''')
         
-        # Cria usuário admin padrão se não existir
         try:
             cursor.execute("INSERT INTO usuarios (username, senha, tipo) VALUES (?, ?, ?)", ('admin', '1234', 'admin'))
         except sqlite3.IntegrityError:
@@ -106,6 +105,23 @@ def login():
         session.update({'user_id': user['id'], 'username': user['username'], 'tipo': user['tipo']})
     return redirect(url_for('index'))
 
+@app.route('/cadastrar_cliente_externo', methods=['POST'])
+def cadastrar_cliente_externo():
+    nome = request.form.get('nome')
+    cpf = request.form.get('cpf')
+    username = request.form.get('username')
+    senha = request.form.get('senha')
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO usuarios (username, senha, tipo) VALUES (?, ?, ?)", (username, senha, 'cliente'))
+            usuario_id = cursor.lastrowid
+            cursor.execute("INSERT INTO clientes (nome, cpf, usuario_id) VALUES (?, ?, ?)", (nome, cpf, usuario_id))
+            conn.commit()
+    except Exception as e:
+        print(f"Erro ao cadastrar: {e}")
+    return redirect(url_for('index'))
+
 @app.route('/cadastrar_produto', methods=['POST'])
 def cadastrar_produto():
     if session.get('tipo') == 'admin':
@@ -113,25 +129,16 @@ def cadastrar_produto():
             nome = request.form.get('nome')
             preco = float(request.form.get('preco', 0))
             estoque = int(request.form.get('estoque', 0))
-            
-            # Tratamento da Imagem
             file = request.files.get('imagem')
             filename = "default.png"
-            
             if file and file.filename != '':
                 filename = secure_filename(file.filename)
-                caminho_salvamento = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(caminho_salvamento)
-
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             with get_db() as conn:
-                conn.execute("INSERT INTO produtos (nome, preco, estoque, imagem) VALUES (?, ?, ?, ?)", 
-                             (nome, preco, estoque, filename))
+                conn.execute("INSERT INTO produtos (nome, preco, estoque, imagem) VALUES (?, ?, ?, ?)", (nome, preco, estoque, filename))
                 conn.commit()
-                
         except Exception as e:
-            print(f"Erro ao cadastrar produto: {e}")
             flash(f"Erro ao salvar: {e}")
-            
     return redirect(url_for('index'))
 
 @app.route('/repor_estoque/<int:id>', methods=['POST'])
@@ -140,12 +147,10 @@ def repor_estoque(id):
         try:
             qtd_raw = request.form.get('quantidade')
             if qtd_raw:
-                qtd = int(qtd_raw)
                 with get_db() as conn:
-                    conn.execute("UPDATE produtos SET estoque = estoque + ? WHERE id = ?", (qtd, id))
+                    conn.execute("UPDATE produtos SET estoque = estoque + ? WHERE id = ?", (int(qtd_raw), id))
                     conn.commit()
-        except ValueError:
-            pass
+        except ValueError: pass
     return redirect(url_for('index'))
 
 @app.route('/remover_produto/<int:id>')
@@ -174,7 +179,5 @@ def logout():
 
 if __name__ == "__main__":
     init_db()
-    # Timer para abrir o navegador automaticamente
     Timer(1.5, abrir_no_firefox).start()
-    # Ativado debug=True para você ver erros detalhados no console caso algo falhe
     app.run(debug=True, use_reloader=False)

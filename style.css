@@ -16,10 +16,16 @@ body { margin: 0; font-family: sans-serif; background: var(--bg); }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
 .login-container { height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--sidebar); }
-.login-card { background: white; padding: 40px; border-radius: 10px; width: 300px; text-align: center; }
+.login-card { background: white; padding: 40px; border-radius: 10px; width: 320px; text-align: center; }
 .btn-primary { background: var(--accent); color: white; border: none; padding: 10px; width: 100%; border-radius: 5px; cursor: pointer; }
 input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; border: 1px solid #ddd; border-radius: 5px; }
 .stats-box { background: #334155; margin: 20px; padding: 15px; border-radius: 10px; }
 .stats-box p { color: #10b981; font-weight: bold; margin: 5px 0; }
 .btn-del { color: #999; float: right; }
 .btn-del:hover { color: red; }
+
+/* Estilos das Abas de Auth */
+.auth-tabs { display: flex; margin-bottom: 20px; border-bottom: 1px solid #ddd; }
+.tab-btn { flex: 1; padding: 10px; border: none; background: none; cursor: pointer; color: #64748b; font-weight: bold; }
+.tab-btn.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+#form-login i, #form-cadastro i { font-size: 40px; color: var(--sidebar); margin-bottom: 10px; }
